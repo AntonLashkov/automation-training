@@ -1,0 +1,38 @@
+{
+    "name": "sumo-cep",
+    "private": true,
+    "version": "1.0.0",
+    "description": "SUMO CEP App",
+    "scripts": {
+        "lint": "npm run lint:lwc",
+        "lint:lwc": "eslint force-app/main/default/lwc",
+        "test": "npm run test:unit",
+        "test:unit": "sfdx-lwc-jest",
+        "test:unit:watch": "sfdx-lwc-jest --watch",
+        "test:unit:debug": "sfdx-lwc-jest --debug",
+        "test:unit:coverage": "sfdx-lwc-jest --coverage",
+        "prettier": "prettier --write \"**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}\"",
+        "prettier:verify": "prettier --list-different \"**/*.{cls,cmp,component,css,html,js,json,md,page,trigger,xml,yaml,yml}\"",
+        "commit": "npx git-cz",
+        "lwc-circular": "npx madge --circular --extensions js ./force-app/main/default/lwc"
+    },
+    "devDependencies": {
+        "@prettier/plugin-xml": "^0.7.2",
+        "@salesforce/eslint-config-lwc": "^0.5.0",
+        "@salesforce/sfdx-lwc-jest": "^0.7.1",
+        "commitizen": "^4.2.2",
+        "eslint": "^6.8.0",
+        "madge": "^5.0.1",
+        "prettier": "^2.1.2",
+        "prettier-plugin-apex": "^1.7.0",
+        "sfdx-cli": "7.94.3"
+    },
+    "config": {
+        "commitizen": {
+            "path": "node_modules/cz-customizable"
+        },
+        "cz-customizable": {
+            "config": "config/.cz-config.js"
+        }
+    }
+}
