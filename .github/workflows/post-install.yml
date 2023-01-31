@@ -86,4 +86,5 @@ jobs:
           MAJOR: ${{ steps.recieve-version-params.outputs.major }}
           MINOR: ${{ steps.recieve-version-params.outputs.minor }}
         run: |
-          node_modules/sfdx-cli/bin/run force:apex:execute | "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();"
+          echo "System.debug('Hello');" > postinstall.apex |
+          sfdx force:apex:execute -f postinstall.apex
