@@ -79,7 +79,7 @@ jobs:
             const version = context.payload.inputs.version.split('.');
 
             core.setOutput('major', version[0])
-            core.setOutput('minor', version.get[1])
+            core.setOutput('minor', version[1])
 
       - name: Get version
         env:
