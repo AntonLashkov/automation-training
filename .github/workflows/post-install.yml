@@ -86,6 +86,6 @@ jobs:
           MAJOR: ${{ steps.recieve-version-params.outputs.major }}
           MINOR: ${{ steps.recieve-version-params.outputs.minor }}
         run: |
-          "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" | sfdx force:apex:execute 
+          echo "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" | sfdx force:apex:execute 
 
 
