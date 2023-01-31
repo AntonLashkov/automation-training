@@ -1,0 +1,97 @@
+name: PostInstall
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      org:
+        required: true
+        description: Target org name.
+        default: 'dev1'
+        type: choise
+        options:
+        - dev1
+        - qa_main
+        - qa_feature2
+        - qa_feature3
+        - qa_feature4
+        - qa_feature5
+      version:
+        required: true
+        description: Package version to run Post-Install script.
+        type: string
+
+jobs:
+  run-post-install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup node
+        uses: actions/setup-node@v2-beta
+        with:
+          node-version: '16.x'
+
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: ${{ github.event.inputs.cache }}
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}
+
+      - name: Setup org secrets
+        id: setup
+        uses: actions/github-script@v3
+        env:
+          SECRETS: ${{ toJson(secrets) }}
+        with:
+          script: |
+            const secrets = JSON.parse(process.env.SECRETS)
+
+            core.setOutput('org-username', `${secrets[`${context.payload.inputs.org.toUpperCase()}_USERNAME`]}`)
+            core.setOutput('org-consumer-key', `${secrets[`${context.payload.inputs.org.toUpperCase()}_CONSUMER_KEY`]}`)
+
+      - name: Install Salesforce CLI
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+
+      - name: Authenticate Org
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_SECRET_KEY }}
+          ORG_USERNAME: ${{ steps.setup.outputs.org-username }}
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.SF_UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${ORG_USERNAME} --setdefaultdevhubusername -a currentorg
+
+      - name: Recieve Post Install version params
+        id: recieve-version-params
+        uses: actions/github-script@v3
+        with:
+          script: |
+            const version = context.payload.inputs.org.split('.');
+
+            core.setOutput('major', version.get(0))
+            core.setOutput('minor', version.get(1))
+
+      - name: Get version
+        env:
+          MAJOR: ${{ steps.recieve-version-params.outputs.major }}
+          MINOR: ${{ steps.recieve-version-params.outputs.minor }}
+        run: |
+          echo "MAJOR: ${MAJOR} - MINOR: ${MINOR}"
+
+      - name: Execute Apex script
+        env:
+          MAJOR: ${{ steps.recieve-version-params.outputs.major }}
+          MINOR: ${{ steps.recieve-version-params.outputs.minor }}
+        run: |
+          echo "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" | sfdx force:apex:execute
+
+

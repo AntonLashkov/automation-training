@@ -7,5 +7,14 @@ global class PostInstall implements InstallHandler {
     }
 
     private void handleInstall() {
+        // Logic for Test
+        insert new Contact(
+            FirstName = 'Test',
+            LastName = this.generateContactLastName(context.previousVersion()) 
+        );
     }  
+
+    private String generateContactLastName(Version version) {
+        return String.format('{0}.{1}', new List<String> { String.valueOf(version.major()), String.valueOf(version.minor())});
+    }
 }
