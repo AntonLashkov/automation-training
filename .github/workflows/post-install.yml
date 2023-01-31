@@ -8,7 +8,7 @@ on:
         required: true
         description: Target org name.
         default: 'dev1'
-        type: choise
+        type: choice
         options:
         - dev1
         - qa_main
@@ -81,18 +81,11 @@ jobs:
             core.setOutput('major', version[0])
             core.setOutput('minor', version[1])
 
-      - name: Get version
-        env:
-          MAJOR: ${{ steps.recieve-version-params.outputs.major }}
-          MINOR: ${{ steps.recieve-version-params.outputs.minor }}
-        run: |
-          echo "MAJOR: ${MAJOR} - MINOR: ${MINOR}"
-
       - name: Execute Apex script
         env:
           MAJOR: ${{ steps.recieve-version-params.outputs.major }}
           MINOR: ${{ steps.recieve-version-params.outputs.minor }}
         run: |
-          echo "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" | sfdx force:apex:execute
+          node_modules/sfdx-cli/bin/run "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" | sfdx force:apex:execute
 
 
