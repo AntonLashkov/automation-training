@@ -85,6 +85,7 @@ jobs:
         env:
           MAJOR: ${{ steps.recieve-version-params.outputs.major }}
           MINOR: ${{ steps.recieve-version-params.outputs.minor }}
+          ORG_USERNAME: ${{ steps.setup.outputs.org-username }}
         run: |
           echo "new SumoInstallContext(${MAJOR}, ${MINOR}).executePostInstall();" > postinstall.apex
-          node_modules/sfdx-cli/bin/run force:apex:execute -f postinstall.apex
+          node_modules/sfdx-cli/bin/run force:apex:execute -f postinstall.apex -u ${ORG_USERNAME}
