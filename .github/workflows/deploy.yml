@@ -136,7 +136,7 @@ jobs:
         env:
           DEPLOY_PATH: ${{ needs.prepare.outputs.deploy-paths }}
         run: |
-          node_modules/sfdx-cli/bin/run force:source:deploy -p {DEPLOY_PATH} -u currentorg
+          node_modules/sfdx-cli/bin/run force:source:deploy -p ${DEPLOY_PATH} -u currentorg
       - name: Execute Post-Install script
         if: github.event.inputs.run_post_install == 'true' && github.event.inputs.post_install_version != ''
         uses: ./.github/workflows/post-install.yml
