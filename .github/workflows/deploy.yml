@@ -1,0 +1,261 @@
+name: DeployManual
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        required: true
+        description: org name. Default origin.
+        default: 'dev1'
+        type: choice
+        options:
+        - dev1
+        - qa_origin
+        - qa_main
+        - qa_feature2
+        - qa_feature3
+        - qa_feature4
+        - qa_feature5
+      start:
+        required: false
+        description: SHA commit start of range commits to deploy.
+        type: string
+      end:
+        required: false
+        description: SHA commit end of range commits to deploy.
+        type: string
+      cache:
+        required: false
+        description: cache name to store
+        default: 'common'
+        type: string
+      keep_flows:
+        require: false
+        description: Comma-separated list of flows to be packaged
+        type: string
+      run_post_install:
+        require: false
+        description: Allow to execute Post-Install script for different version
+        default: false
+        type: boolean
+      post_install_version:
+        require: false
+        description: Version for execution Post-Install script 17.0, 16.9 etc.
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      build-libs: ${{ steps.result.outputs.build-libs }}
+      deploy-paths: ${{ steps.result.outputs.deploy-paths }}
+      delete-paths: ${{ steps.convert.outputs.delete-paths }}
+      has-changes: ${{ steps.result.outputs.has-changes }}
+      has-deletes: ${{ steps.convert.outputs.has-deletes }}
+    steps:
+      - name: Context
+        uses: actions/github-script@v3
+        with:
+          script: |
+            console.log(`Inputs: ${JSON.stringify(context.payload.inputs)}`)
+      - name: Setup job environment
+        id: job_env
+        uses: actions/github-script@v3
+        with:
+          script: |
+            const endSha = context.payload.inputs.end || context.sha;
+            core.setOutput('end-sha', endSha)
+      - name: Checkout
+        if: github.event.inputs.start != ''
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ steps.job_env.outputs.end-sha }}
+      - name: Get changed files
+        if: github.event.inputs.start != ''
+        id: changes
+        uses: dmitry-prohorov/file-changes-action@master
+        with:
+          pushBefore: ${{ github.event.inputs.start }}
+          pushAfter: ${{ steps.job_env.outputs.end-sha }}
+      - name: Convert git changes to SFDX paths
+        if: github.event.inputs.start != ''
+        id: convert
+        uses: ./.github/actions/convert-git-changes-to-sfdx-paths
+        with:
+          files: ${{ steps.changes.outputs.files }}
+          files-added: ${{ steps.changes.outputs.files_added }}
+          files-modified: ${{ steps.changes.outputs.files_modified }}
+          files-removed: ${{ steps.changes.outputs.files_removed }}
+          files-renamed: ${{ steps.changes.outputs.files_renamed }}
+          files-previous: ${{ steps.changes.outputs.files_previous }}
+      - name: Set outputs
+        uses: actions/github-script@v3
+        id: result
+        env:
+          DEPLOY_PATHS: ${{ steps.convert.outputs.deploy-paths }}
+          BUILD_LIBS: ${{ steps.convert.outputs.build-libs }}
+          HAS_CHANGES: ${{ steps.convert.outputs.has-changes }}
+        with:
+          script: |
+            if (!context.payload.inputs.start) {
+              core.setOutput('build-libs', 'true')
+              core.setOutput('deploy-paths', 'force-app/main/default')
+              core.setOutput('has-changes', 'true')
+            } else {
+              core.setOutput('build-libs', process.env.BUILD_LIBS)
+              core.setOutput('deploy-paths', process.env.DEPLOY_PATHS)
+              core.setOutput('has-changes', process.env.HAS_CHANGES)
+            }
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - name: Checkout
+        if: needs.prepare.outputs.has-changes == 'true'
+        uses: actions/checkout@v2
+      - name: Setup node
+        if: needs.prepare.outputs.has-changes == 'true'
+        uses: actions/setup-node@v2-beta
+        with:
+          node-version: '16.x'
+      - name: Cache node modules
+        if: needs.prepare.outputs.has-changes == 'true'
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: ${{ github.event.inputs.cache }}
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+      - name: Setup org secrets
+        if: needs.prepare.outputs.has-changes == 'true'
+        id: setup
+        uses: actions/github-script@v3
+        env:
+          SECRETS: ${{ toJson(secrets) }}
+        with:
+          script: |
+            const secrets = JSON.parse(process.env.SECRETS)
+
+            core.setOutput('org-username', `${secrets[`${context.payload.inputs.org.toUpperCase()}_USERNAME`]}`)
+            core.setOutput('org-consumer-key', `${secrets[`${context.payload.inputs.org.toUpperCase()}_CONSUMER_KEY`]}`)
+      - name: Install Salesforce CLI
+        if: needs.prepare.outputs.has-changes == 'true' && steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+      - name: Authenticate Org
+        if: needs.prepare.outputs.has-changes == 'true'
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_SECRET_KEY }}
+          ORG_USERNAME: ${{ steps.setup.outputs.org-username }}
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.SF_UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${ORG_USERNAME} --setdefaultdevhubusername -a currentorg
+      - name: Project Metadata Prepare
+        if: needs.prepare.outputs.has-changes == 'true'
+        uses: ./.github/actions/prepare-project-metadata
+        with:
+          prepare-default-connector-settings: 'true'
+          app-certificate: ${{ secrets.SUMO_PACKAGE_CONNECTED_APP_CERTIFICATE }}
+          admin-token: ${{ secrets.JAVA_ADMIN_TOKEN }}
+          crypto-key: ${{ secrets.JAVA_CRYPTO_KEY }}
+          java-endpoint: ${{ secrets.JAVA_STAGING_ENDPOINT }}
+          consumer-key: ${{ steps.setup.outputs.org-consumer-key }}
+          zoom-client-id: ${{ secrets.ZOOM_CLIENT_ID }}
+          zoom-client-secret: ${{ secrets.ZOOM_CLIENT_SECRET }}
+      - name: Keep Some Flows
+        if: github.event.inputs.keep_flows != ''
+        env:
+          FLOWS_INPUT: ${{ github.event.inputs.keep_flows }}
+        run: |
+          cd force-app/main/default/flows
+          IFS="," read -a flows <<< $FLOWS_INPUT
+
+          # Now build the list of "-not -name" options from the flows array:
+          for flow in "${flows[@]}"; do
+              exclude_files+=( -not -name "$flow" )
+          done
+
+          # Remove proper flows
+          find . -type f "${exclude_files[@]}" -delete
+          ls -lt .
+      - name: Remove All Flows
+        if: github.event.inputs.keep_flows == ''
+        run: rm -rf force-app/main/default/flows
+      - name: Check settings
+        run: cat config/connected-app/DefaultConnectionSettings.Settings.md-meta.xml
+      - name: Deploy source to org
+        if: needs.prepare.outputs.has-changes == 'true'
+        run: |
+          cp config/connected-app/DefaultConnectionSettings.Settings.md-meta.xml force-app/main/default/customMetadata
+          node_modules/sfdx-cli/bin/run force:source:deploy -p ${{ needs.prepare.outputs.deploy-paths }} -u currentorg
+      - name: Execute Post-Install script
+        if: github.event.inputs.run_post_install == 'true' && github.event.inputs.post_install_version != ''
+        uses: ./.github/workflows/post-install.yml
+        with:
+          org: ${{ github.event.inputs.org }}
+          version: ${{ github.event.inputs.post_install_version }}
+      
+  delete:
+    needs: [prepare, deploy]
+    runs-on: ubuntu-latest
+    if: needs.prepare.outputs.has-deletes == 'true'
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.inputs.start }}
+      - uses: actions/setup-node@v2-beta
+        with:
+          node-version: '16.x'
+      - name: Cache node modules
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: ${{ github.event.inputs.cache }}
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Setup org secrets
+        id: setup
+        uses: actions/github-script@v3
+        env:
+          SECRETS: ${{ toJson(secrets) }}
+        with:
+          script: |
+            const secrets = JSON.parse(process.env.SECRETS)
+
+            core.setOutput('org-username', `${secrets[`${context.payload.inputs.org.toUpperCase()}_USERNAME`]}`)
+            core.setOutput('org-consumer-key', `${secrets[`${context.payload.inputs.org.toUpperCase()}_CONSUMER_KEY`]}`)
+      - name: Install Salesforce CLI
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+      - name: Authenticate Org
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_SECRET_KEY }}
+          ORG_USERNAME: ${{ steps.setup.outputs.org-username }}
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.SF_UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${ORG_USERNAME} --setdefaultdevhubusername -a currentorg
+      - name: Delete source from org
+        run: |
+          node_modules/sfdx-cli/bin/run force:source:delete -p ${{ needs.prepare.outputs.delete-paths }} -u currentorg -r
