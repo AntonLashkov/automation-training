@@ -95,7 +95,7 @@ jobs:
         uses: actions/github-script@v3
         with:
           script: |
-            const version = context.payload.inputs.version.split('.');
+            const version = github.event.inputs.version.split('.');
 
             core.setOutput('major', version[0])
             core.setOutput('minor', version[1])
