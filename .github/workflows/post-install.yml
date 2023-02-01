@@ -93,13 +93,11 @@ jobs:
       - name: Recieve Post Install version params
         id: recieve-version-params
         uses: actions/github-script@v3
-        env:
-          CONTEXT: ${{ toJson(context) }}
         with:
           script: |
             const version = context.payload.inputs.version || context.version;
             const verionParams = version.split('.');
-            console.log(${CONTEXT));
+            console.log(context);
             core.setOutput('major', verionParams[0]);
             core.setOutput('minor', verionParams[1]);
 
