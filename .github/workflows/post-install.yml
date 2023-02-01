@@ -5,20 +5,11 @@ on:
     inputs:
       org:
         required: true
-        description: Target org name.
-        default: 'dev1'
-        type: choice
-        options:
-        - dev1
-        - qa_main
-        - qa_feature2
-        - qa_feature3
-        - qa_feature4
-        - qa_feature5
+        type: string
       version:
         required: true
-        description: Package version to run Post-Install script.
         type: string
+
   workflow_dispatch:
     inputs:
       org:

@@ -32,11 +32,6 @@ on:
         require: false
         description: Comma-separated list of flows to be packaged
         type: string
-      run_post_install:
-        require: false
-        description: Allow to execute Post-Install script for different version
-        default: false
-        type: boolean
       post_install_version:
         require: false
         description: Version for execution Post-Install script 17.0, 16.9 etc.
@@ -137,10 +132,10 @@ jobs:
           DEPLOY_PATH: ${{ needs.prepare.outputs.deploy-paths }}
         run: |
           node_modules/sfdx-cli/bin/run force:source:deploy -p ${DEPLOY_PATH} -u currentorg
-          
+
   run-post-install:
     needs: deploy 
-    if: github.event.inputs.run_post_install == 'true' && github.event.inputs.post_install_version != ''
+    if: github.event.inputs.post_install_version != ''
     uses: ./.github/workflows/post-install.yml
     with:
       org: ${{ github.event.inputs.org }}
