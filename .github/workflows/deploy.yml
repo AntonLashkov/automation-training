@@ -140,3 +140,7 @@ jobs:
     with:
       org: ${{ github.event.inputs.org }}
       version: ${{ github.event.inputs.post_install_version }}
+    secrets:
+      SALESFORCE_JWT_SECRET_KEY: ${{ secrets.SALESFORCE_JWT_SECRET_KEY }}
+      DEV1_CONSUMER_KEY: ${{ secrets.DEV1_CONSUMER_KEY }}
+      DEV1_USERNAME: ${{ secrets.DEV1_USERNAME }}
