@@ -10,6 +10,17 @@ on:
         required: true
         type: string
 
+    secrets:
+      SALESFORCE_JWT_SECRET_KEY:
+        required: true
+        description: JWT token to access to target org
+      DEV1_USERNAME:
+        required: true
+        description: Authorization - target org user name
+      DEV1_CONSUMER_KEY:
+        required: true
+        description: Authorization - connected app consumer key
+
   workflow_dispatch:
     inputs:
       org:
