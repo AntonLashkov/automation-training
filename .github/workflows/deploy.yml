@@ -154,7 +154,7 @@ jobs:
       - name: Authenticate Org
         if: needs.prepare.outputs.has-changes == 'true'
         env:
-          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_SECRET_KEY }}
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.SALESFORCE_JWT_SECRET_KEY }}
           ORG_USERNAME: ${{ steps.setup.outputs.org-username }}
         run: |
           echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
