@@ -1,0 +1,49 @@
+name: 'Convert git changes to sfdx deploy path'
+description: 'Takes git changed files and convert them to comma-separated list of local source to deploy for sfdx'
+author: 'd-pro'
+inputs:
+  mode:
+    description: >
+      Specify the type of org to deploy. Default is 'develop'
+      Type 'develop' mean that we can add/remove any metadata
+      Type 'package' mean that we need to filter remove metadata (not all could be removed)
+    required: false
+    default: develop
+  files:
+    description: >
+      The names all new, updated, and removed files.
+      Use trilom/file-changes-action@v1.2.4 action to get this info
+    required: true
+  files-added:
+    description: >
+      The names of the newly created files
+      Use trilom/file-changes-action@v1.2.4 action to get this info
+    required: true
+  files-removed:
+    description: >
+      The names of the removed files
+      Use trilom/file-changes-action@v1.2.4 action to get this info
+    required: true
+  files-modified:
+    description: >
+      The names of the updated files
+      Use trilom/file-changes-action@v1.2.4 action to get this info
+    required: true
+  files-renamed:
+    description: >
+      The names of the renamed files
+      Use trilom/file-changes-action@v1.2.4 action to get this info
+    required: true
+  files-previous:
+    description: >
+      The names of the previous names of renamed files
+      Use dmitry-prohorov/file-changes-action@master action to get this info
+    required: true
+outputs:
+  paths:
+    description: 'comma-separated list of local source to deploy for sfdx'
+  build-libs:
+    description: 'Boolean parameter which tells you to build or not libs'
+runs:
+  using: 'node12'
+  main: 'dist/index.js'

@@ -1,0 +1,396 @@
+name: PackageReusable
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        description: Version number to specify for creating package
+        type: string
+      name:
+        required: true
+        description: Create package name
+        type: string
+      skip_deploy:
+        required: false
+        description: Allow to skip package-deploy step
+        type: string
+        default: 'false'
+      skip_delete:
+        required: false
+        description: Allow to skip package-delete step
+        type: string
+        default: 'false'
+      skip_packaging:
+        required: false
+        description: Allow to skip create-package step
+        type: string
+        default: 'false'
+      skip_release:
+        required: false
+        description: Allow to skip create-package step
+        type: string
+        default: 'false'
+      keep_flows:
+        required: false
+        description: Comma-separated list of flows to be packaged
+        type: string
+      postfix:
+        required: false
+        description: github tag postfix
+        type: string
+      prerelease:
+        required: false
+        description: Allow to create github prerelease
+        type: string
+        default: 'false'
+    secrets:
+      TOKEN:
+        required: true
+        description: Github access token
+      UTILS_JWT_KEY:
+        required: true
+        description: Authorization - connected app server key
+      UTILS_CONSUMER_KEY:
+        required: true
+        description: Authorization - connected app consumer key
+      ORG_USERNAME:
+        required: true
+      PACKAGE_ID:
+        required: true
+      APP_CERTIFICATE:
+        required: true
+      JAVA_ADMIN_TOKEN:
+        required: true
+      JAVA_CRYPTO_KEY:
+        required: true
+      JAVA_ENDPOINT:
+        required: true
+      PACKAGE_CONSUMER_KEY:
+        required: true
+      ZOOM_CLIENT_ID:
+        required: true
+      ZOOM_CLIENT_SECRET:
+        required: true
+
+jobs:
+  package-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      delete-paths: ${{ steps.covert.outputs.delete-paths }}
+      has-deleted: ${{ steps.covert.outputs.has-deletes }}
+      base: ${{ steps.setup.outputs.base }}
+      api-version: ${{ steps.setup.outputs.version }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup job environment
+        id: setup
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{ secrets.TOKEN }}
+          script: |
+            const masterBranch = await github.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'master'
+            })
+            core.setOutput('base', masterBranch.data.commit.sha)
+
+            const project = require(`${process.env.GITHUB_WORKSPACE}/sfdx-project.json`)
+            core.setOutput('version', project.sourceApiVersion)
+      - name: Get changed files
+        id: changes
+        uses: dmitry-prohorov/file-changes-action@master
+        with:
+          pushBefore: ${{ steps.setup.outputs.base}}
+          pushAfter: ${{ github.sha}}
+      - name: Convert git changes to SFDX paths
+        id: convert
+        uses: ./.github/actions/convert-git-changes-to-sfdx-paths
+        with:
+          files: ${{ steps.changes.outputs.files }}
+          files-added: ${{ steps.changes.outputs.files_added }}
+          files-modified: ${{ steps.changes.outputs.files_modified }}
+          files-removed: ${{ steps.changes.outputs.files_removed }}
+          files-renamed: ${{ steps.changes.outputs.files_renamed }}
+          files-previous: ${{ steps.changes.outputs.files_previous }}
+
+  package-deploy:
+    needs: package-prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - uses: actions/checkout@v2
+        if: github.event.inputs.skip_deploy == 'false'
+      - uses: actions/setup-node@v2-beta
+        if: github.event.inputs.skip_deploy == 'false'
+        with:
+          node-version: "16.x"
+      - name: Cache node modules
+        if: github.event.inputs.skip_deploy == 'false'
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install Salesforce CLI
+        if: github.event.inputs.skip_deploy == 'false'
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+      - name: Authenticate Packaging Org
+        if: github.event.inputs.skip_deploy == 'false'
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${{ secrets.ORG_USERNAME }} --setdefaultdevhubusername -a packaging
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_KEY }}
+      - name: Project Metadata Prepare
+        if: github.event.inputs.skip_deploy == 'false'
+        uses: ./.github/actions/prepare-project-metadata
+        with:
+          prepare-default-connector-settings: 'true'
+          app-certificate: ${{ secrets.APP_CERTIFICATE }}
+          admin-token: ${{ secrets.JAVA_ADMIN_TOKEN }}
+          crypto-key: ${{ secrets.JAVA_CRYPTO_KEY }}
+          java-endpoint: ${{ secrets.JAVA_ENDPOINT }}
+          consumer-key: ${{ secrets.PACKAGE_CONSUMER_KEY }}
+          zoom-client-id: ${{ secrets.ZOOM_CLIENT_ID }}
+          zoom-client-secret: ${{ secrets.ZOOM_CLIENT_SECRET }}
+      - name: Keep Some Flows
+        if: github.event.inputs.skip_deploy == 'false' && github.event.inputs.keep_flows != ''
+        env:
+          FLOWS_INPUT: ${{ github.event.inputs.keep_flows }}
+        run: |
+          cd force-app/main/default/flows
+          IFS="," read -a flows <<< $FLOWS_INPUT
+
+          # Now build the list of "-not -name" options from the flows array:
+          for flow in "${flows[@]}"; do
+              exclude_files+=( -not -name "$flow" )
+          done
+
+          # Remove proper flows
+          find . -type f "${exclude_files[@]}" -delete
+          ls -lt .
+      - name: Remove All Flows
+        if: github.event.inputs.skip_deploy == 'false' && github.event.inputs.keep_flows == ''
+        run: rm -rf force-app/main/default/flows
+      - name: Deploy source to Packaging org
+        if: github.event.inputs.skip_deploy == 'false'
+        run: |
+          cp config/connected-app/DefaultConnectionSettings.Settings.md-meta.xml force-app/main/default/customMetadata
+          node_modules/sfdx-cli/bin/run force:source:convert -d src -r force-app/main/default -n '${{ github.event.inputs.name }}'
+          node_modules/sfdx-cli/bin/run force:mdapi:deploy -d src -w -1 -l RunLocalTests -u packaging
+      - name: Add postinstall script
+        if: github.event.inputs.skip_deploy == 'false'
+        run: |
+          mkdir postinstall
+          mkdir postinstall/classes
+          cp -R force-app/main/default/classes/PostInstall.cls* postinstall/classes
+          cat > postinstall/package.xml << EOF
+          <Package xmlns="http://soap.sforce.com/2006/04/metadata">
+                <types>
+                    <name>ApexClass</name>
+                    <members>PostInstall</members>
+                </types>
+                <fullName>${{ github.event.inputs.name }}</fullName>
+                <postInstallClass>PostInstall</postInstallClass>
+                <version>${{ needs.package-prepare.outputs.api-version }}</version>
+          </Package>
+          EOF
+          node_modules/sfdx-cli/bin/run force:mdapi:deploy -d postinstall -w -1 -u packaging
+
+  package-delete:
+    needs: [package-prepare, package-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - name: Checkout to previous state
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false'
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.package-prepare.outputs.base }}
+      - uses: actions/setup-node@v2-beta
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false'
+        with:
+          node-version: "16.x"
+      - name: Cache node modules
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false'
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: "**/node_modules"
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install Salesforce CLI
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false' && steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+      - name: Authenticate Packaging org
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false'
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${{ secrets.ORG_USERNAME }} --setdefaultdevhubusername -a packaging
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_KEY }}
+      - name: Delete source from Packaging org
+        if: needs.package-prepare.outputs.has-deletes == 'true' && github.event.inputs.skip_delete == 'false'
+        run: |
+          node_modules/sfdx-cli/bin/run force:source:delete -p ${{ needs.package-prepare.outputs.delete-paths }} -u packaging -r
+
+  create-package:
+    needs: [package-prepare, package-deploy, package-delete]
+    runs-on: ubuntu-latest
+    outputs:
+      package-version-id: ${{ steps.packaging.outputs.package-version-id }}
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - uses: actions/checkout@v2
+        if: github.event.inputs.skip_packaging == 'false'
+      - name: Prepare job env
+        if: github.event.inputs.skip_packaging == 'false'
+        id: prepare
+        uses: actions/github-script@v3
+        with:
+          script: |
+            core.setOutput('package-name', `"${context.payload.inputs.name} (v${context.payload.inputs.version})"`)
+      - uses: actions/setup-node@v2-beta
+        if: github.event.inputs.skip_packaging == 'false'
+        with:
+          node-version: "16.x"
+      - name: Cache node modules
+        if: github.event.inputs.skip_packaging == 'false'
+        id: cache-node-modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: "**/node_modules"
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Install Salesforce CLI
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event.inputs.skip_packaging == 'false'
+        run: |
+          npm install sfdx-cli@7.94.3
+          node_modules/sfdx-cli/bin/run --version
+          node_modules/sfdx-cli/bin/run plugins --core
+      - name: Authenticate packaging org
+        if: github.event.inputs.skip_packaging == 'false'
+        run: |
+          echo "${SALESFORCE_JWT_SECRET_KEY}" > server.key
+          node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${{ secrets.UTILS_CONSUMER_KEY }} --jwtkeyfile server.key --username ${{ secrets.ORG_USERNAME }} --setdefaultdevhubusername -a packaging
+        env:
+          SALESFORCE_JWT_SECRET_KEY: ${{ secrets.UTILS_JWT_KEY }}
+      - name: Create package
+        if: github.event.inputs.skip_packaging == 'false'
+        id: package
+        run: |
+          echo ::set-output name=result::$(node_modules/sfdx-cli/bin/run force:package1:version:create -m -w 60 -n ${{ steps.prepare.outputs.package-name }} -v ${{ github.event.inputs.version }} -u packaging -i ${{ secrets.PACKAGE_ID }} --json)
+      - name: Extract package results
+        if: github.event.inputs.skip_packaging == 'false'
+        id: packaging
+        uses: actions/github-script@v3
+        env:
+          PACKAGE_RESULTS: ${{ steps.package.outputs.result }}
+        with:
+          script: |
+            const packageResult = JSON.parse(process.env.PACKAGE_RESULTS)
+            console.log(packageResult)
+            if (packageResult.status !== 0) {
+              throw new Error(`${packageResult.name}: ${packageResult.message}`)
+            }
+
+            core.setOutput('package-version-id', packageResult.result.MetadataPackageVersionId)
+
+  create-release:
+    needs: [package-prepare, create-package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Context
+        env:
+          NEEDS_CONTEXT: ${{ toJson(needs) }}
+        run: |
+          echo "$NEEDS_CONTEXT"
+      - uses: actions/checkout@v2
+        # This makes Actions fetch all Git history
+        with:
+          fetch-depth: 0
+      - name: Create tag
+        if: github.event.inputs.skip_release == 'false'
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{ secrets.TOKEN }}
+          script: |
+            const tag = await github.git.createTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: `v${context.payload.inputs.version}${context.payload.inputs.postfix || ''}`,
+              message: `v${context.payload.inputs.version}${context.payload.inputs.postfix || ''}`,
+              object: context.sha,
+              type: 'commit',
+            });
+
+            const ref = await github.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/v${context.payload.inputs.version}${context.payload.inputs.postfix || ''}`,
+              sha: tag.data.sha
+            })
+            console.log(ref)
+      - name: Create release
+        if: github.event.inputs.skip_release == 'false'
+        uses: actions/github-script@v3
+        env:
+          PACKAGE_VERSION_ID: ${{ needs.create-package.outputs.package-version-id }}
+          BASE_SHA: ${{ needs.package-prepare.outputs.base }}
+        with:
+          github-token: ${{ secrets.TOKEN }}
+          script: |
+            const releaseScript = require(`${process.env.GITHUB_WORKSPACE}/scripts/release/dist/index.js`)
+            const releaseLog = await releaseScript({
+              github,
+              repo: context.repo,
+              base: process.env.BASE_SHA,
+              head: context.sha
+            })
+            await github.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${context.payload.inputs.version}${context.payload.inputs.postfix || ''}`,
+              prerelease: `${context.payload.inputs.prerelease}` == 'true',
+              name: `${context.payload.inputs.name} (${context.payload.inputs.version})`,
+              body: `### [Installation link](https://login.salesforce.com/packaging/installPackage.apexp?p0=${process.env.PACKAGE_VERSION_ID})
+
+              ### Resolved issues: \r\n${releaseLog}
+              `
+            })

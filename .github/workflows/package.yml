@@ -1,0 +1,63 @@
+name: PackageCI
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        description: Version number to specify for creating package
+        type: string
+      name:
+        required: true
+        description: Create package name
+        default: SUMO-CEP
+        type: string
+      skip_deploy:
+        require: false
+        description: Allow to skip package-deploy step
+        default: false
+        type: boolean
+      skip_delete:
+        require: false
+        description: Allow to skip package-delete step
+        default: false
+        type: boolean
+      skip_packaging:
+        require: false
+        description: Allow to skip create-package step
+        default: false
+        type: boolean
+      skip_release:
+        require: false
+        description: Allow to skip create-release step
+        default: false
+        type: boolean
+      keep_flows:
+        require: false
+        description: Comma-separated list of flows to be packaged
+        type: string
+
+jobs:
+  run-package-reusable:
+    uses: ./.github/workflows/package-reusable.yml
+    with:
+      version: ${{ github.event.inputs.version }}
+      name: ${{ github.event.inputs.name }}
+      skip_deploy: ${{ github.event.inputs.skip_deploy }}
+      skip_delete: ${{ github.event.inputs.skip_delete }}
+      skip_packaging: ${{ github.event.inputs.skip_packaging }}
+      skip_release: ${{ github.event.inputs.skip_release }}
+      keep_flows: ${{ github.event.inputs.keep_flows }}
+    secrets:
+      TOKEN: ${{ secrets.DPRO_TOKEN }}
+      UTILS_JWT_KEY: ${{ secrets.UTILS_JWT_SECRET_KEY }}
+      UTILS_CONSUMER_KEY: ${{ secrets.SF_UTILS_CONSUMER_KEY }}
+      ORG_USERNAME: ${{ secrets.PACKAGING_ORG_USERNAME }}
+      PACKAGE_ID: ${{ secrets.SUMO_CEP_PACKAGE_ID }}
+      APP_CERTIFICATE: ${{ secrets.SUMO_PACKAGE_CONNECTED_APP_CERTIFICATE }}
+      JAVA_ADMIN_TOKEN: ${{ secrets.JAVA_ADMIN_TOKEN }}
+      JAVA_CRYPTO_KEY: ${{ secrets.JAVA_CRYPTO_KEY }}
+      JAVA_ENDPOINT: ${{ secrets.JAVA_DEMO_ENDPOINT }}
+      PACKAGE_CONSUMER_KEY: ${{ secrets.SUMO_PACKAGE_CONSUMER_KEY }}
+      ZOOM_CLIENT_ID: ${{ secrets.ZOOM_CLIENT_ID }}
+      ZOOM_CLIENT_SECRET: ${{ secrets.ZOOM_CLIENT_SECRET }}
