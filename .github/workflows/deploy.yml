@@ -133,8 +133,10 @@ jobs:
           node_modules/sfdx-cli/bin/run force:auth:jwt:grant --clientid ${ORG_CONSUMER_KEY} --jwtkeyfile server.key --username ${ORG_USERNAME} --setdefaultdevhubusername -a currentorg
       - name: Deploy source to org
         if: needs.prepare.outputs.has-changes == 'true'
+        env:
+          DEPLOY_PATH: ${{ needs.prepare.outputs.deploy-paths }}
         run: |
-          node_modules/sfdx-cli/bin/run force:source:deploy -p force/main/default -u currentorg
+          node_modules/sfdx-cli/bin/run force:source:deploy -p {DEPLOY_PATH} -u currentorg
       - name: Execute Post-Install script
         if: github.event.inputs.run_post_install == 'true' && github.event.inputs.post_install_version != ''
         uses: ./.github/workflows/post-install.yml
