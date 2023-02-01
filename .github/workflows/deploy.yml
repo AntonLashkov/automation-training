@@ -135,6 +135,7 @@ jobs:
 
   run-post-install:
     needs: deploy 
+    runs-on: ubuntu-latest
     if: github.event.inputs.post_install_version != ''
     uses: ./.github/workflows/post-install.yml
     with:
